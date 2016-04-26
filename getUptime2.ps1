@@ -89,10 +89,10 @@ foreach ($system in $serverList) {
 	}
 	
 #YO ADD THROTTLING TO MAKE THIS NOT SUCK
-Wait-Job -timeout 120 -Job $jobs > $null
+$jobs | Wait-Job -timeout 120 -Job $jobs > $null
 $output = @()
 
-foreach($job in (Get-Job)){
+foreach($job in $jobs){
 	$output += $_ | Receive-Job $job | Select-Object Server,LastBoot,Uptime,Details
 	$output | Export-Csv $fileName -noTypeInformation -append
 }
