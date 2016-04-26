@@ -85,15 +85,26 @@ $jobs = @()
 foreach ($system in $serverList) {	
 	$jobs += Start-Job -ScriptBlock $scriptblock -ArgumentList $system
 	$i++
-	Write-Progress -activity "Starting Job $i of $($serverList.count)" -percentComplete ($i / $serverList.Count*100) 
+	Write-Progress -id 1 -activity "Starting Job $i of $($serverList.count)" -percentComplete ($i / $serverList.Count*100) 
 	}
 	
 #YO ADD THROTTLING TO MAKE THIS NOT SUCK
-$jobs | Wait-Job -timeout 120 -Job $jobs > $null
-$output = @()
 
+#Wait-Job -timeout 120 -Job $jobs > $null
+$output = @()
+$j = 0
 foreach($job in $jobs){
-	$output += $_ | Receive-Job $job | Select-Object Server,LastBoot,Uptime,Details
+	$output = Get-Job | Wait-Job -timeout 30 | receive-job
+	$output | Select Server,Lastboot,Uptime,Details | Export-Csv $fileName -noTypeInformation -append
+	Write-Progress -id 2 -parentid 1 -activity "Starting Job $j of $($serverList.count)" -percentComplete ($j / $serverList.Count*100)
+}
+
+
+
+<#
+$jobs | % {
+	$output += $_ | Receive-Job | Select-Object Server,LastBoot,Uptime,Details
 	$output | Export-Csv $fileName -noTypeInformation -append
 }
+#>
 
