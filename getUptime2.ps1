@@ -92,6 +92,7 @@ foreach ($system in $serverList) {
 $jobs | Wait-Job -timeout 120 -Job $jobs > $null
 $output = @()
 
+
 foreach($job in $jobs){
 	$output += $_ | Receive-Job $job | Select-Object Server,LastBoot,Uptime,Details
 	$output | Export-Csv $fileName -noTypeInformation -append
