@@ -13,12 +13,34 @@ Function Save-File([string] $initialDirectory ) {
     $OpenFileDialog.initialDirectory = $initialDirectory
     $OpenFileDialog.filter = "All files (*.*)| *.*"
     $OpenFileDialog.ShowDialog() |  Out-Null
-	
 	$nameWithExtension = "$($OpenFileDialog.filename).csv"
 	return $nameWithExtension
 }
 
-$scriptblock = {
+Function Handle-Job($job){
+		$holder = Receive-Job -id $job.id
+		if($job.state -eq "Stopped"){
+			$holder.Details = "WMI Timeout"
+		}
+		$holder | Select Server,Lastboot,Uptime,Details | Export-Csv $fileName -noTypeInformation -append
+		Write-Host $holder.server
+		Remove-Job -id $job.id
+}
+
+Workflow Timeout-Job(){
+	$now = Get-Date
+	foreach -parallel ($job in @(Get-Job -State Running)) {
+		if ($now - (Get-Job -Id $job.id).PSBeginTime -gt [TimeSpan]::FromSeconds(30)) {
+			Sequence{
+				Wait-Job -id $job.id -timeout 5
+				Stop-Job -id $job.id
+				Handle-Job($job)
+			}
+		}
+	}
+}
+
+$getServerInfo = {
 	param($system)
 	$rtn = Test-Connection -ComputerName $system -Count 1 -Quiet
 	if($rtn) {
@@ -39,17 +61,12 @@ $scriptblock = {
 					$LastBootUpTime = [System.Management.ManagementDateTimeconverter]::ToDateTime($Bootup)
 					$now = Get-Date
 					$Uptime = $now - $lastBootUpTime
-					$d = $Uptime.Days
-					$h = $Uptime.Hours
-					$m = $uptime.Minutes
-					$s = $uptime.Seconds
-					$a = [string]$d + ":" + $h + ":" + $m + ":" + $s
-					
+					$upString = [string]$Uptime.Days + ":" + $Uptime.Hours + ":" + $uptime.Minutes + ":" + $uptime.Seconds
 					
 					$serverInfo = New-Object -TypeName PSObject -Property @{
 						Server = $system
 						LastBoot = $LastBootUpTime
-						Uptime = $a
+						Uptime = $upString
 						Details = $ErrorMessage
 					}
 			}
@@ -58,7 +75,7 @@ $scriptblock = {
 					$serverInfo = New-Object -TypeName PSObject -Property @{
 						Server = $system
 						LastBoot = $LastBootUpTime
-						Uptime = $a
+						Uptime = $upString
 						Details = $ErrorMessage
 					}
 				}
@@ -69,7 +86,7 @@ $scriptblock = {
 			$serverInfo = New-Object -TypeName PSObject -Property @{
 				Server = $system
 				LastBoot = $LastBootUpTime
-				Uptime = $a
+				Uptime = $upString
 				Details = $ErrorMessage
 			}
 
@@ -80,46 +97,32 @@ $scriptblock = {
 $serverList = Get-Content -Path (Get-FileName)
 $fileName = Save-File $fileName
 $i = 0
+$j = 0
 $erroractionpreference = "SilentlyContinue"
-
 $jobs = @()
-foreach ($system in $serverList) {	
-	$jobs += Start-Job -ScriptBlock $scriptblock -ArgumentList $system
+$output = @()
+$maxJobs = 32
+
+get-job | Remove-Job | out-null
+
+foreach ($system in $serverList) {
+	while ((Get-Job -State Running).Count -ge $maxJobs) {
+		Timeout-Job | Out-Null
+    }
+	$jobs += Start-Job -ScriptBlock $getServerInfo -ArgumentList $system
 	$i++
 	Write-Progress -id 1 -activity "Starting Job $i of $($serverList.count)" -percentComplete ($i / $serverList.Count*100) 
-	}
-
-$output = @()
-$output = get-job
-
-$finalObject = @()
-
-$j = 0
-
-foreach($job in $output){
-	
-
-	$holder = Receive-Job -id $job.id
-
-	while (@(Get-Job -State Running)) {
-		$j++
-		Write-Progress -id 2 -activity "Finishing Job $j of $($serverList.count)" -percentComplete ($j / $serverList.Count*100) 	
-		$now = Get-Date
-			foreach ($job in @(Get-Job -State Running)) {
-				if ($now - (Get-Job -Id $job.id).PSBeginTime -gt [TimeSpan]::FromSeconds(30)) {
-					Stop-Job $job
-				}
-			}
-		Start-Sleep -sec 2
-	}
-
-	if(($job.state = "Failed") -or ($job.state = "Stopped")){
-		$holder.Details = "WMI Timeout"
-	}
-	
-	$finalObject = $holder | Select Server,Lastboot,Uptime,Details | Export-Csv $fileName -noTypeInformation -append
 }
 
-get-job | Remove-Job
+while (@(Get-Job -State Running)) {
+	Timeout-Job | Out-Null
+}
 
-
+$output = get-job
+	
+foreach($job in $output){
+	Handle-Job($job)
+	$j++
+	Write-Progress -id 2 -activity "Completing Job $j of $($output.count)" -percentComplete ($j / $output.Count*100)
+	
+}
