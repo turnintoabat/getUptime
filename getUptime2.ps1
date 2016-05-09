@@ -23,7 +23,6 @@ Function Handle-Job($job){
 			$holder.Details = "WMI Timeout"
 		}
 		$holder | Select Server,Lastboot,Uptime,Details | Export-Csv $fileName -noTypeInformation -append
-		Write-Host $holder.server
 		Remove-Job -id $job.id
 }
 
